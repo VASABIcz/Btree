@@ -1,0 +1,21 @@
+[package]
+name = "intBTree"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+rustflags = ["-C target-cpu=native"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+strip = true
+debug = false
+
+[dependencies]
+arc-swap = "1.6.0"
+chashmap = "2.2.2"
+bencher = "0.1.5"
