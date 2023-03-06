@@ -1,6 +1,7 @@
 #![feature(let_chains)]
 #![feature(new_uninit)]
 #![allow(soft_unstable)]
+#![no_mangle]
 
 use std::alloc::{alloc_zeroed, Layout};
 use std::arch::x86_64::{_rdrand32_step, _rdrand64_step};
@@ -9,7 +10,8 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::ops::{Deref, Range};
 use std::process::Termination;
-use std::sync::{Arc, LockResult, RwLock, RwLockReadGuard};
+use std::sync::Arc;
+use parking_lot::*;
 use std::thread::Thread;
 use std::time::Instant;
 
@@ -168,39 +170,30 @@ impl<const CAPACITY: usize, T: Clone> IntNode<CAPACITY, T> {
     }
 
     #[inline]
-    pub fn read(&self) -> Option<RwLockReadGuard<IntNodeItems<T>>> {
-        match self.items.read() {
-            Ok(v) => Some(v),
-            Err(_) => None
-        }
+    pub fn read(&self) -> RwLockReadGuard<IntNodeItems<T>> {
+        self.items.read()
     }
 
     #[inline]
     pub fn getRange(&self) -> Option<Range<isize>> {
         let lock = self.read();
-        match lock {
-            None => None,
-            Some(v) => v.getRange().clone()
-        }
+        lock.getRange().clone()
     }
 
     #[inline]
-    pub fn length(&self) -> Option<usize> {
+    pub fn length(&self) -> usize {
         let lock = self.read();
-        match lock {
-            None => None,
-            Some(v) => Some(v.items.len())
-        }
+        lock.items.len()
     }
 
     #[inline]
     pub fn insertItem(&self, value: isize, src: T) {
-        self.items.write().unwrap().insert(value, src)
+        self.items.write().insert(value, src)
     }
 
     #[inline]
     pub fn pop(&self) -> Option<(isize, T)> {
-        self.items.write().unwrap().items.pop()
+        self.items.write().items.pop()
     }
 
     #[inline]
@@ -223,10 +216,10 @@ impl<const CAPACITY: usize, T: Clone> IntNode<CAPACITY, T> {
             Some(v) => v
         };
 
-        if range.contains(&value) || self.length() < Some(CAPACITY) {
+        if range.contains(&value) || self.length() < CAPACITY {
             // value is in current node
             self.insertItem(value, src);
-            if self.length().unwrap() > CAPACITY {
+            if self.length() > CAPACITY {
                 let v = self.pop().unwrap();
                 Self::insertOrCreate(&self.right, v.0, v.1);
             }
@@ -243,10 +236,7 @@ impl<const CAPACITY: usize, T: Clone> IntNode<CAPACITY, T> {
 
     #[inline]
     pub fn query(&self, range: &Range<isize>, buf: &mut Vec<T>) {
-        match self.read() {
-            None => {}
-            Some(v) => v.query(range, buf)
-        }
+        self.read().query(range, buf)
     }
 
     #[inline]
@@ -256,12 +246,7 @@ impl<const CAPACITY: usize, T: Clone> IntNode<CAPACITY, T> {
 
     #[inline]
     pub fn findRange(&self, range: &Range<isize>, buf: &mut Vec<T>) {
-        let lock = match self.read() {
-            None => {
-                return;
-            }
-            Some(v) => v
-        };
+        let lock = self.read();
 
         let nodeRange = match lock.getRange() {
             None => {
@@ -275,13 +260,25 @@ impl<const CAPACITY: usize, T: Clone> IntNode<CAPACITY, T> {
 
         if range.end > nodeRange.start && nodeRange.end > range.start {
             Self::queryWithLock(&lock, range, buf);
-            drop(lock)
         }
-        if checkRight && let Some(v) = self.right.load().deref().deref() {
-            v.findRange(range, buf)
+        drop(lock);
+        if checkRight {
+            let a = self.right.load();
+            match a.deref().deref() {
+                None => {}
+                Some(v) => {
+                    v.findRange(range, buf);
+                }
+            }
         }
-        if checkLeft && let Some(v) = self.left.load().deref().deref() {
-            v.findRange(range, buf)
+        if checkLeft {
+            let a = self.left.load();
+            match a.deref().deref() {
+                None => {}
+                Some(v) => {
+                    v.findRange(range, buf);
+                }
+            }
         }
     }
 }
@@ -294,7 +291,7 @@ fn main() {
         let now = Instant::now();
 
         {
-            for _ in 0..10_000_000 {
+            for _ in 0..1_000_000 {
                 unsafe { _rdrand64_step(&mut i) };
                 root.insert(i as isize, (Arc::new(None), 0));
             }
@@ -330,15 +327,14 @@ fn main() {
     {
         let now = Instant::now();
 
-        {
-            let mut buf = vec![];
-            r.findRange(&((isize::MIN)..0), &mut buf);
-        }
+        let mut buf = vec![];
+        r.findRange(&((isize::MIN)..0), &mut buf);
 
         let elapsed = now.elapsed();
-        println!("query 1 thread {elapsed:?}")
+        println!("query 1 thread {elapsed:?} {}", buf.len())
     }
 
+    /*
     {
         let now = Instant::now();
 
@@ -354,4 +350,5 @@ fn main() {
         let elapsed = now.elapsed();
         println!("test {elapsed:?}")
     }
+     */
 }

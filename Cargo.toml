@@ -12,10 +12,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 opt-level = 3
-strip = true
-debug = false
+strip = false
+debug = true
 
 [dependencies]
 arc-swap = "1.6.0"
 chashmap = "2.2.2"
 bencher = "0.1.5"
+parking_lot = "0.12.1"
